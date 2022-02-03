@@ -1,0 +1,150 @@
+---
+title: "Data assembly"
+author: "Carole Voulgaris"
+date: "1/20/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(sf)
+library(fs)
+library(lubridate)
+```
+
+
+# Load Smart Location Database
+
+Downloaded from https://edg.epa.gov/EPADataCommons/public/OA/SLD/SmartLocationDatabaseV3.zip and saved to raw_datasets folder (listed in .gitignore)
+
+```{r}
+sld_data <- st_read(path('raw_datasets',
+                            'SmartLocationDatabaseV3',
+                            'SmartLocationDatabase.gdb')) %>%
+  filter(STATEFP == '42',
+         COUNTYFP == '003') %>%
+  select(P_WrkAge, # percent of population that is working age (18-64)
+      Pct_AO0, # percent zero-car hhs
+      Pct_AO1, # percent 1-car hhs
+      Pct_AO2p, # percent 2+ car hhs
+      R_PCTLOWWAGE, # percent low-wage workers
+      E_PctLowWage, #pct low-wage lobs
+      D1A, # HU density
+      D1B, # population density
+      D1C, # employment density
+      D1C8_RET, # retail job density
+      D1C8_OFF, # office job density
+      D1C8_IND, # industrial
+      D1C8_SVC, # service
+      D1C8_ENT, # entertainment
+      D1C8_ED, # education
+      D1C8_HLTH, # health
+      D1C8_PUB, # government?
+      D1D, #activity density
+      D2A_EPHHM, # jobs per hh?
+      D3A, # network density
+      D3AAO, # car network density
+      D3APO, # ped network density
+      D3B, # intersection density
+      D4A, # distance to transit
+      D4B025, # pct jobs within 1/4 mile of transit
+      D4B050, # pct jobs within 1/2 mile of transit
+      D4C, # transit frequency within 1/4 mile of boundary, evening peak
+      D4D, # transit frequency per square mile
+      D4E, # transit frequency per capita
+      D5AR, # jobs within 45 minutes, car
+      D5AE, # workers within 45 minutes, car
+      D5BR, # jobs within 45 minutes, transit
+      D5BE) # workers within 45 minutes, transit
+      
+```
+
+# Load county assessor data
+
+```{r}
+parcel_data <- read_csv('https://data.wprdc.org/dataset/2b3df818-601e-4f06-b150-643557229491/resource/f2b8d575-e256-4718-94ad-1e12239ddb92/download/assessments.csv')
+
+parcels <- st_read('https://data.wprdc.org/dataset/6bb2a968-761d-48cf-ac5b-c1fc80b4fe6a/resource/42231cab-8341-48d6-b695-47612dd6514a/download/parcelcoords.csv',
+  options = c("X_POSSIBLE_NAMES=x", "Y_POSSIBLE_NAMES=y")) %>%
+  rename(PARID = PIN) %>%
+  left_join(parcel_data) %>%
+  st_set_crs(st_crs(sld_data))
+
+parcel_info <- parcels %>%
+  select(PROPERTYHOUSENUM, PROPERTYFRACTION, PROPERTYADDRESS,
+         PROPERTYUNIT, PROPERTYCITY, PROPERTYSTATE, PROPERTYZIP)
+```
+
+Selected parcel variables --
+
+We can add some on sale data, but questions re:
+* Properties that have never been sold
+* Properties with a sale price of \$0 or \$1
+
+
+```{r}
+parcel_values <- parcels %>%
+  select(LOTAREA,
+         FAIRMARKETBUILDING,
+         FAIRMARKETLAND,
+         FAIRMARKETTOTAL,
+         YEARBLT) %>%
+  mutate(bldg_pct = FAIRMARKETBUILDING / FAIRMARKETTOTAL)
+```
+
+selected tract / lending variables
+
+for now - just number of mf loans per tract, but there's a lot more we can do with this.
+
+Multifamily tract data from: https://www.fhfa.gov/DataTools/Downloads/Documents/Enterprise-PUDB/Multi-Family_National_File_/2020_MFNationalFile2020.zip
+
+Single family tract data are also available...
+
+Also, we can get data going back to 2008.
+
+We won't use this for now since there are only 35 tracts with any loans in 2020.
+
+```{r}
+names <- paste("tst", 1:31, sep="_")
+
+loans_fnma <- read_fwf(path('raw_datasets',
+                            '2020_MFCensusTract2020',
+                            'fnma_mf2020c_loans.txt')) %>%
+  setNames(c("EntFlag",
+             "RecNo",
+             "State",
+             "MSA",
+             "County",
+             "Tract",
+             names))
+
+loans_fhlmc <- read_fwf(path('raw_datasets',
+                            '2020_MFCensusTract2020',
+                            'fhlmc_mf2020c_loans.txt')) %>%
+  setNames(c("EntFlag",
+             "RecNo",
+             "State",
+             "MSA",
+             "County",
+             "Tract",
+             names))
+
+tract_loans <- rbind(loans_fnma, loans_fhlmc) %>%
+  filter(State == '42',
+         County == '003') %>%
+  group_by(Tract) %>%
+  summarise(num_loans = n())
+```
+
+join parcel data to SLD data (this doesn't work)
+
+```{r}
+full_data <- st_join(parcel_values, sld_data)
+
+st_write(full_data, dsn = 'pitt-shiny/parcels.geojson')
+```
+

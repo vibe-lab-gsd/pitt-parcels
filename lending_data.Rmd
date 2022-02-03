@@ -1,0 +1,99 @@
+---
+title: "Lending Data"
+author: "Carole Voulgaris & Yoji Toriumi"
+date: "2/3/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE}
+library(tidyverse)
+library(fs)
+```
+
+
+## Load data
+
+Multifamily census tract files: https://www.fhfa.gov/DataTools/Downloads/Pages/Multifamily-Census-Tract-File.aspx
+
+Single family census tract files:
+https://www.fhfa.gov/DataTools/Downloads/Pages/Single-Family-Census-Tract-File.aspx
+
+Download the zip file and extract it to a folder in your project directory called `raw_datasets` (listed in the GitIgnore file)
+
+See the included data dictionary for a list of variable descriptions.
+
+Here's an example where I read in a couple files (Fannie Mae and Freddie Mac data for 2020) and just count the total number of loans in each census tract for that one year.
+
+```{r}
+names <- c("EntFlag",
+           "RecNo",
+           "State",
+           "MSA",
+           "County",
+           "Tract",
+           "PctMinority",
+           "MedIncome",
+           "areaMedIncome",
+           "IncomeRatio",
+           "areaMedFamInc",
+           "UPB",
+           "Purpose",
+           "InstType",
+           "FedGuaran",
+           "LienStat",
+           "LTV",
+           "NoteDate",
+           "Term",
+           "numUnits",
+           "rate",
+           "amt",
+           "propVal",
+           "prepayPenalty",
+           "balloon",
+           "interestOnly",
+           "negAmort",
+           "other",
+           "pctAfford",
+           "constMethod",
+           "Rural",
+           "MissDelta",
+           "Appalachia",
+           "persPov",
+           "consPov",
+           "HiOpp",
+           "QOZ")
+
+loans_fnma <- read_fwf(path('raw_datasets',
+                            '2020_MFCensusTract2020',
+                            'fnma_mf2020c_loans.txt'),
+                       show_col_types = FALSE) %>%
+  setNames(names)
+
+loans_fhlmc <- read_fwf(path('raw_datasets',
+                            '2020_MFCensusTract2020',
+                            'fhlmc_mf2020c_loans.txt'),
+                       show_col_types = FALSE) %>%
+  setNames(names)
+
+tract_loans <- rbind(loans_fnma, loans_fhlmc) %>%
+  filter(State == '42',
+         County == '003') %>%
+  group_by(Tract) %>%
+  summarise(num_loans = n())
+```
+
+## Tasks
+
+* Load data files for all years (use `rbind()`).
+* Generate a summary dataframe with the following variables at the census tract level:
+    + Average number of single-family loans per year
+    + Average number of multifamily loans per year
+    + Average number of loans per year by loan purpose
+    + Average number of units for multifamily loans
+    + Average percent of affordable units
+    + Is it an opportunity zone?
+    + Other tract-level variables about lending you think could be interesting?
