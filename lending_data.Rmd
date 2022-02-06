@@ -29,7 +29,8 @@ See the included data dictionary for a list of variable descriptions.
 Here's an example where I read in a couple files (Fannie Mae and Freddie Mac data for 2020) and just count the total number of loans in each census tract for that one year.
 
 ```{r}
-names <- c("EntFlag",
+# since data structure are different in 2008-2009, 2010-2017, and 2018-2020, prepare three col names for multi-family data
+mf_08_09_names <- c("EntFlag",
            "RecNo",
            "State",
            "MSA",
@@ -38,7 +39,44 @@ names <- c("EntFlag",
            "PctMinority",
            "MedIncome",
            "areaMedIncome",
-           "IncomeRatio",
+           "TractIncomeRatio",
+           "areaMedFamInc",
+           "UPB",
+           "Purpose",
+           "InstType",
+           "FedGuaran",
+           "UndAreaIndi",
+           "LienStat"
+           )
+
+mf_10_17_names <- c("EntFlag",
+           "RecNo",
+           "State",
+           "MSA",
+           "County",
+           "Tract",
+           "PctMinority",
+           "MedIncome",
+           "areaMedIncome",
+           "TractIncomeRatio",
+           "areaMedFamInc",
+           "UPB",
+           "Purpose",
+           "InstType",
+           "FedGuaran",
+           "LienStat"
+           )
+
+mf_18_20_names <- c("EntFlag",
+           "RecNo",
+           "State",
+           "MSA",
+           "County",
+           "Tract",
+           "PctMinority",
+           "MedIncome",
+           "areaMedIncome",
+           "TractIncomeRatio",
            "areaMedFamInc",
            "UPB",
            "Purpose",
@@ -67,24 +105,439 @@ names <- c("EntFlag",
            "HiOpp",
            "QOZ")
 
-loans_fnma <- read_fwf(path('raw_datasets',
-                            '2020_MFCensusTract2020',
-                            'fnma_mf2020c_loans.txt'),
-                       show_col_types = FALSE) %>%
-  setNames(names)
+# import multi-family data
+for (i in c(2008:2009)) {
+  filename <- paste0("mf_", i, "_fnma")
+  assign(
+    filename,
+    read_fwf(path(
+      "raw_datasets",
+      paste(i, "_MFCensusTract", i, sep = ""),
+      paste("fnma_mf", i, "c_loans.txt", sep = "")
+    ),
+    col_types = cols("number","character","character","character","character","character","number","number","number","number","number","number","number","number","number","number","number","number"),
+    show_col_types = FALSE) %>%
+      setNames(mf_08_09_names) %>%
+      filter(State == '42',
+             County == '003') %>%
+      mutate(year = i)
+  )
+}
 
-loans_fhlmc <- read_fwf(path('raw_datasets',
-                            '2020_MFCensusTract2020',
-                            'fhlmc_mf2020c_loans.txt'),
-                       show_col_types = FALSE) %>%
-  setNames(names)
+for (i in c(2008:2009)) {
+  filename <- paste0("mf_", i, "_fhlmc")
+  assign(
+    filename,
+    read_fwf(path(
+      "raw_datasets",
+      paste(i, "_MFCensusTract", i, sep = ""),
+      paste("fhlmc_mf", i, "c_loans.txt", sep = "")
+    ),
+    col_types = cols("number","character","character","character","character","character","number","number","number","number","number","number","number","number","number","number","number","number"),
+    show_col_types = FALSE) %>%
+      setNames(mf_08_09_names) %>%
+      filter(State == '42',
+             County == '003') %>%
+      mutate(year = i)
+  )
+}
 
-tract_loans <- rbind(loans_fnma, loans_fhlmc) %>%
+for (i in c(2010:2017)) {
+  filename <- paste0("mf_", i, "_fnma")
+  assign(
+    filename,
+    read_fwf(path(
+      "raw_datasets",
+      paste(i, "_MFCensusTract", i, sep = ""),
+      paste("fnma_mf", i, "c_loans.txt", sep = "")
+    ),
+    col_types = cols("number","character","character","character","character","character","number","number","number","number","number","number","number","number","number","number","number"),
+    show_col_types = FALSE) %>%
+      setNames(mf_10_17_names) %>%
+      filter(State == '42',
+             County == '003') %>%
+      mutate(year = i)
+  )
+}
+
+for (i in c(2010:2017)) {
+  filename <- paste0("mf_", i, "_fhlmc")
+  assign(
+    filename,
+    read_fwf(path(
+      "raw_datasets",
+      paste(i, "_MFCensusTract", i, sep = ""),
+      paste("fhlmc_mf", i, "c_loans.txt", sep = "")
+    ),
+    col_types = cols("number","character","character","character","character","character","number","number","number","number","number","number","number","number","number","number","number"),
+    show_col_types = FALSE) %>%
+      setNames(mf_10_17_names) %>%
+      filter(State == '42',
+             County == '003') %>%
+      mutate(year = i)
+  )
+}
+
+for (i in c(2018:2020)) {
+  filename <- paste0("mf_", i, "_fnma")
+  assign(
+    filename,
+    read_fwf(path(
+      "raw_datasets",
+      paste(i, "_MFCensusTract", i, sep = ""),
+      paste("fnma_mf", i, "c_loans.txt", sep = "")
+    ),col_types = cols("number","character","character","character","character","character","number","number","number","number","number","number","number","number","number","number","number","number","number","number","number","number","number","number","number","number","number","number","number","number","number","number","number","number","number"),
+    show_col_types = FALSE) %>%
+      setNames(mf_18_20_names) %>%
+      filter(State == '42',
+             County == '003') %>%
+      mutate(year = i)
+  )
+}
+
+for (i in c(2018:2020)) {
+  filename <- paste0("mf_", i, "_fhlmc")
+  assign(
+    filename,
+    read_fwf(path(
+      "raw_datasets",
+      paste(i, "_MFCensusTract", i, sep = ""),
+      paste("fhlmc_mf", i, "c_loans.txt", sep = "")
+    ),col_types = cols("number","character","character","character","character","character","number","number","number","number","number","number","number","number","number","number","number","number","number","number","number","number","number","number","number","number","number","number","number","number","number","number","number","number","number"),
+    show_col_types = FALSE) %>%
+      setNames(mf_18_20_names) %>%
+      filter(State == '42',
+             County == '003') %>%
+      mutate(year = i)
+  )
+}
+```
+
+```{r}
+# since data structure are different in 2008-2009, 2010-2017, and 2018-2020, prepare three col names for single-family data. Data structure of single-family is a bit different from multi-family. 
+sf_08_09_names <- c("EntFlag",
+           "RecNo",
+           "State",
+           "MSA",
+           "County",
+           "Tract",
+           "PctMinority",
+           "MedIncome",
+           "areaMedIncome",
+           "TractIncomeRatio",
+           "BorrowersIncome",
+           "areaMedFamInc",
+           "BorrowerIncomeRatio",
+           "UPB",
+           "Purpose",
+           "FedGuaran",
+           "NumBorrower",
+           "FirstBuyer",
+           "Race_1",
+           "Race_2",
+           "Race_3",
+           "Race_4",
+           "Race_5",
+           "Ethnicity",
+           "CoBoRace_1",
+           "CoBoRace_2",
+           "CoBoRace_3",
+           "CoBoRace_4",
+           "CoBoRace_5",
+           "CoBoEthnicity",
+           "Gender",
+           "CoBoGender",
+           "Age",
+           "CoBoAge",
+           "Occupancy",
+           "UndAreaIndi",
+           "RateSpread",
+           "Hoepa",
+           "PropertyType",
+           "LienStat"
+           )
+
+sf_10_17_names <- c("EntFlag",
+           "RecNo",
+           "State",
+           "MSA",
+           "County",
+           "Tract",
+           "PctMinority",
+           "MedIncome",
+           "areaMedIncome",
+           "TractIncomeRatio",
+           "BorrowersIncome",
+           "areaMedFamInc",
+           "BorrowerIncomeRatio",
+           "UPB",
+           "Purpose",
+           "FedGuaran",
+           "NumBorrower",
+           "FirstBuyer",
+           "Race_1",
+           "Race_2",
+           "Race_3",
+           "Race_4",
+           "Race_5",
+           "Ethnicity",
+           "CoBoRace_1",
+           "CoBoRace_2",
+           "CoBoRace_3",
+           "CoBoRace_4",
+           "CoBoRace_5",
+           "CoBoEthnicity",
+           "Gender",
+           "CoBoGender",
+           "Age",
+           "CoBoAge",
+           "Occupancy",
+           "RateSpread",
+           "Hoepa",
+           "PropertyType",
+           "LienStat"
+           )
+
+sf_18_20_names <- c("EntFlag",
+           "RecNo",
+           "State",
+           "MSA",
+           "County",
+           "Tract",
+           "PctMinority",
+           "MedIncome",
+           "areaMedIncome",
+           "TractIncomeRatio",
+           "BorrowersIncome",
+           "areaMedFamInc",
+           "BorrowerIncomeRatio",
+           "UPB",
+           "Purpose",
+           "FedGuaran",
+           "NumBorrower",
+           "FirstBuyer",
+           "Race_1",
+           "Race_2",
+           "Race_3",
+           "Race_4",
+           "Race_5",
+           "Ethnicity",
+           "CoBoRace_1",
+           "CoBoRace_2",
+           "CoBoRace_3",
+           "CoBoRace_4",
+           "CoBoRace_5",
+           "CoBoEthnicity",
+           "Gender",
+           "CoBoGender",
+           "Age",
+           "CoBoAge",
+           "Occupancy",
+           "RateSpread",
+           "Hoepa",
+           "PropertyType",
+           "LienStat",
+           "Over62",
+           "CoBoOver62",
+           "LTV",
+           "NoteDate",
+           "Term",
+           "numUnits",
+           "rate",
+           "amt",
+           "Preapproval",
+           "AppliChannel",
+           "AUS",
+           "CreditScoreBo",
+           "CreditScoreCoBo",
+           "DTIRatio",
+           "DiscountPoints",
+           "IntroRatePeriod",
+           "LandProperyInterest",
+           "propVal",
+           "Rural",
+           "MissDelta",
+           "Appalachia",
+           "persPov",
+           "consPov",
+           "HiOpp",
+           "QOZ")
+
+
+for (i in c(2008:2009)) {
+  filename <- paste0("sf_", i, "_fhlmc")
+  assign(
+    filename,
+    read_fwf(path(
+      "raw_datasets",
+      paste(i, "_SFCensusTractFRE", i, sep = ""),
+      paste("fhlmc_sf", i, "c_loans.txt", sep = "")
+    ),
+    show_col_types = FALSE) %>%
+      setNames(sf_08_09_names) %>%
+      filter(State == '42',
+             County == '003') %>%
+      mutate(year = i)
+  )
+}
+
+for (i in c(2008:2009)) {
+  filename <- paste0("sf_", i, "_fnma")
+  assign(
+    filename,
+    read_fwf(path(
+      "raw_datasets",
+      paste(i, "_SFCensusTractFNM", i, sep = ""),
+      paste("fnma_sf", i, "c_loans.txt", sep = "")
+    ),
+    show_col_types = FALSE) %>%
+      setNames(sf_08_09_names) %>%
+      filter(State == '42',
+             County == '003') %>%
+      mutate(year = i)
+  )
+}
+
+for (i in c(2010:2017)) {
+  filename <- paste0("sf_", i, "_fhlmc")
+  assign(
+    filename,
+    read_fwf(path(
+      "raw_datasets",
+      paste(i, "_SFCensusTractFRE", i, sep = ""),
+      paste("fhlmc_sf", i, "c_loans.txt", sep = "")
+    ),
+    show_col_types = FALSE) %>%
+      setNames(sf_10_17_names) %>%
+      filter(State == '42',
+             County == '003') %>%
+      mutate(year = i)
+  )
+}
+
+for (i in c(2010:2017)) {
+  filename <- paste0("sf_", i, "_fnma")
+  assign(
+    filename,
+    read_fwf(path(
+      "raw_datasets",
+      paste(i, "_SFCensusTractFNM", i, sep = ""),
+      paste("fnma_sf", i, "c_loans.txt", sep = "")
+    ),
+    show_col_types = FALSE) %>%
+      setNames(sf_08_09_names) %>%
+      filter(State == '42',
+             County == '003') %>%
+      mutate(year = i)
+  )
+}
+
+for (i in c(2018:2020)) {
+  filename <- paste0("sf_", i, "_fhlmc")
+  assign(
+    filename,
+    read_fwf(path(
+      "raw_datasets",
+      paste(i, "_SFCensusTractFRE", i, sep = ""),
+      paste("fhlmc_sf", i, "c_loans.txt", sep = "")
+    ),
+    show_col_types = FALSE) %>%
+      setNames(sf_18_20_names) %>%
+      filter(State == '42',
+             County == '003') %>%
+      mutate(year = i)
+  )
+}
+
+for (i in c(2018:2020)) {
+  filename <- paste0("sf_", i, "_fnma")
+  assign(
+    filename,
+    read_fwf(path(
+      "raw_datasets",
+      paste(i, "_SFCensusTractFNM", i, sep = ""),
+      paste("fnma_sf", i, "c_loans.txt", sep = "")
+    ),
+    show_col_types = FALSE) %>%
+      setNames(sf_18_20_names) %>%
+      filter(State == '42',
+             County == '003') %>%
+      mutate(year = i)
+  )
+}
+```
+
+```{r}
+# bind multi-family and single family data
+mf_data <-
+  bind_rows(
+    mf_2008_fhlmc,
+    mf_2009_fhlmc,
+    mf_2010_fhlmc,
+    mf_2011_fhlmc,
+    mf_2012_fhlmc,
+    mf_2013_fhlmc,
+    mf_2014_fhlmc,
+    mf_2015_fhlmc,
+    mf_2016_fhlmc,
+    mf_2017_fhlmc,
+    mf_2018_fhlmc,
+    mf_2019_fhlmc,
+    mf_2020_fhlmc,
+    mf_2008_fnma,
+    mf_2009_fnma,
+    mf_2010_fnma,
+    mf_2011_fnma,
+    mf_2012_fnma,
+    mf_2013_fnma,
+    mf_2014_fnma,
+    mf_2015_fnma,
+    mf_2016_fnma,
+    mf_2017_fnma,
+    mf_2018_fnma,
+    mf_2019_fnma,
+    mf_2020_fnma
+  )
+
+sf_data <-
+  bind_rows(
+    sf_2008_fhlmc,
+    sf_2009_fhlmc,
+    sf_2010_fhlmc,
+    sf_2011_fhlmc,
+    sf_2012_fhlmc,
+    sf_2013_fhlmc,
+    sf_2014_fhlmc,
+    sf_2015_fhlmc,
+    sf_2016_fhlmc,
+    sf_2017_fhlmc,
+    sf_2018_fhlmc,
+    sf_2019_fhlmc,
+    sf_2020_fhlmc,
+    sf_2008_fnma,
+    sf_2009_fnma,
+    sf_2010_fnma,
+    sf_2011_fnma,
+    sf_2012_fnma,
+    sf_2013_fnma,
+    sf_2014_fnma,
+    sf_2015_fnma,
+    sf_2016_fnma,
+    sf_2017_fnma,
+    sf_2018_fnma,
+    sf_2019_fnma,
+    sf_2020_fnma
+  )
+```
+
+```{r}
+tract_loans <- rbind(sf_2020_fnma, sf_2020_fhlmc) %>%
   filter(State == '42',
          County == '003') %>%
   group_by(Tract) %>%
   summarise(num_loans = n())
 ```
+
 
 ## Tasks
 
