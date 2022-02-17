@@ -541,15 +541,19 @@ sf_data <-
 
 data <- bind_rows(sf_data, mf_data)
 
+write_csv(sf_data, "sf_loan_data.csv")
+write_csv(mf_data, "mf_loan_data.csv")
 write_csv(data, "loan_data.csv")
 ```
 
 ```{r}
-tract_loans <- rbind(sf_2020_fnma, sf_2020_fhlmc) %>%
+tract_loans <- data %>%
   filter(State == '42',
          County == '003') %>%
   group_by(Tract) %>%
   summarise(num_loans = n())
+
+tract_loans
 ```
 
 
