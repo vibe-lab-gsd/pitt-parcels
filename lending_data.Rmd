@@ -11,7 +11,14 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r, message=FALSE}
 library(tidyverse)
+library(tidycensus)
+library(tigris)
+library(sf)
 library(fs)
+library(modeest)
+library(ggspatial)
+library(ggthemes)
+library(scales) 
 ```
 
 
@@ -526,9 +533,14 @@ sf_2008_2017_data <-
     sf_2016_fnma,
     sf_2017_fnma)
 
+# transform continuous age variable to categorical variable
 sf_2008_2017_data$Age <- as.numeric(cut(sf_2008_2017_data$Age,
-       breaks = c(0, 24, 34, 44, 54, 64, 74, 110, 999),
-    labels = c(1, 2, 3, 4, 5, 6, 7, 9)))
+       breaks = c(0, 24, 34, 44, 54, 64, 74, 120, 121, 999),
+    labels = c(1, 2, 3, 4, 5, 6, 7, 8, 9)))
+
+sf_2008_2017_data$CoBoAge <- as.numeric(cut(sf_2008_2017_data$CoBoAge,
+       breaks = c(0, 24, 34, 44, 54, 64, 74, 120, 121, 999),
+    labels = c(1, 2, 3, 4, 5, 6, 7, 8, 9)))
 
 sf_data <-
   bind_rows(
@@ -539,7 +551,14 @@ sf_data <-
   ) %>%
       mutate(FamilyType = "sf")
 
-data <- bind_rows(sf_data, mf_data)
+# select columns that are collected in the whole years
+mf_data <- mf_data %>% 
+  select(1:15, 17:18, 40)
+
+sf_data <- sf_data %>% 
+  select(1:35, 37:41, 67)
+
+data <- bind_rows(mf_data, sf_data)
 
 write_csv(sf_data, "sf_loan_data.csv")
 write_csv(mf_data, "mf_loan_data.csv")
@@ -547,14 +566,189 @@ write_csv(data, "loan_data.csv")
 ```
 
 ```{r}
-tract_loans <- data %>%
-  filter(State == '42',
-         County == '003') %>%
-  group_by(Tract) %>%
-  summarise(num_loans = n())
+# count the number of sf and mf loans for each tract and calculate medians of income and upd.
 
-tract_loans
+tract_sf_loans <- data %>% filter(FamilyType == "sf", BorrowersIncome < 999999999, UPB < 999999999, Age < 9) %>% 
+  group_by(Tract) %>% 
+  summarise(sf_num_loans = n(), sf_med_income = median(BorrowersIncome), sf_med_upb = median(UPB), mode_race = mfv(Race_1), mean_age = mean(Age))
+
+tract_mf_loans <- data %>% filter(FamilyType == "mf") %>% 
+  group_by(Tract) %>% 
+  summarise(mf_num_loans = n(), mf_med_upb = median(UPB))
+
+tract_loans <- full_join(tract_sf_loans, tract_mf_loans, by = c("Tract" = "Tract"))
 ```
+
+```{r}
+PA_state_plane <- "+proj=lcc +lat_1=41.95 +lat_2=40.88333333333333 +lat_0=40.16666666666666 +lon_0=-77.75 +x_0=600000 +y_0=0 +ellps=GRS80 +datum=NAD83 +to_meter=0.3048006096012192 +no_defs"
+
+tracts <- tracts("PA", "003") %>% 
+  st_transform(PA_state_plane)
+
+# The number of tracts collected from FHFA is different from that of tigris. FHFA contains 446 tracts though the tigris contains only 402.
+
+tract_loans <- full_join(tract_loans, tracts, by = c("Tract" = "TRACTCE"))
+# tract_loans <- mutate_at(tract_loans, c("sf_num_loans", "mf_num_loans", "sf_med_income", "sf_med_upb", "mf_med_upb"), ~replace(., is.na(.), 0))
+
+tract_loans <- tract_loans %>% 
+  mutate(family = case_when(sf_num_loans > 0 & mf_num_loans > 0 ~ "Single Family and Multi Family",
+                             sf_num_loans > 0 & is.na(mf_num_loans) ~ "Single Family only",
+                             is.na(sf_num_loans) & mf_num_loans > 0 ~ "Single Family only",
+                             is.na(sf_num_loans) & is.na(mf_num_loans) ~ "None"
+                             ))
+# load river data
+river <- read_sf("https://openac-alcogis.opendata.arcgis.com/datasets/def3bd39f12d408c9bd097f5a3b3b136_0.geojson?outSR=%7B%22latestWkid%22%3A3857%2C%22wkid%22%3A102100%7D") %>% 
+  st_transform(PA_state_plane)
+```
+
+
+```{r}
+tract_loans %>% 
+  ggplot() + 
+  geom_sf(aes(geometry = geometry, fill = family), color = "gray70") +
+  geom_sf(data = river, fill = "blue", color = NA, alpha = 1/3) +
+  scale_fill_manual(values = c("white", "greenyellow", "tomato")) +
+  theme_map() +
+  labs(title = "Loans based on family type", fill = "Family type") +
+  theme(legend.position = c(0, 0),
+        legend.background = element_rect(fill=alpha("white", 0.5))) 
+```
+
+```{r}
+
+ggplot(river) +
+  geom_sf(data = river, fill = "blue", color = NA)
+
+tract_loans %>% 
+  ggplot() + 
+  geom_sf(aes(geometry = geometry, fill = sf_num_loans, color = "")) +
+  geom_sf(data = river, fill = "blue", color = NA, alpha = 1/3) +
+  theme_map() +
+  scale_fill_gradientn(colors = c("greenyellow", "orange", "tomato"), na.value = "white") +
+  scale_color_manual(values = NA, name = "No data") +
+  labs(title = "Number of single-family loans", fill = "n") +
+  theme(legend.position = c(0, 0),
+        legend.background = element_rect(fill=alpha("white", 0.5))) +
+  guides(color=guide_legend("No data", override.aes=c(fill="white")))
+```
+
+```{r}
+tract_loans %>% 
+  ggplot() + 
+  geom_sf(aes(geometry = geometry, fill = mf_num_loans, color = "")) +
+  geom_sf(data = river, fill = "blue", color = NA, alpha = 1/3) +
+  theme_map()+
+  scale_fill_gradientn(colors = c("greenyellow", "orange", "tomato"), na.value = "white") +
+  scale_color_manual(values = NA, name = "No data") +
+  labs(title = "Number of multi-family loans", fill = "n") +
+  theme(legend.position = c(0, 0),
+        legend.background = element_rect(fill=alpha("white", 0.5))) +
+  guides(color=guide_legend("No data", override.aes=c(fill="white")))
+```
+
+```{r}
+tract_loans %>% 
+  ggplot() + 
+  geom_sf(aes(geometry = geometry, fill = mf_med_upb, color = "")) +
+  theme_map()+
+  scale_fill_gradientn(colors = c("greenyellow", "orange", "tomato"), na.value = "white", labels = comma) +
+  geom_sf(data = river, fill = "blue", color = NA, alpha = 1/3) +
+  scale_color_manual(values = NA, name = "No data") + 
+  labs(title = "Multi-family median unpaid principal balance (UPD)", fill = "$") +
+  theme(legend.position = c(0, 0),
+        legend.background = element_rect(fill=alpha("white", 0.5))) +
+  guides(color=guide_legend("No data", override.aes=c(fill="white")))
+```
+
+```{r}
+tract_loans %>% 
+  ggplot() + 
+  geom_sf(aes(geometry = geometry, fill = sf_med_upb, color = "")) +
+  geom_sf(data = river, fill = "blue", color = NA, alpha = 1/3) +
+  theme_map()+
+  scale_fill_gradientn(colors = c("greenyellow", "orange", "tomato"), na.value = "white", labels = comma) +
+  scale_color_manual(values = NA, name = "No data") + 
+  labs(title = "Single-family median unpaid principal balance (UPD)", fill = "$") +
+  theme(legend.position = c(0, 0),
+        legend.background = element_rect(fill=alpha("white", 0.5))) +
+  guides(color=guide_legend("No data", override.aes=c(fill="white")))
+```
+
+```{r}
+tract_loans %>% filter(sf_med_income < 5000000) %>% 
+  ggplot() + 
+  geom_sf(aes(geometry = geometry, fill = sf_med_income, color = "")) +
+  geom_sf(data = river, fill = "blue", color = NA, alpha = 1/3) +
+  theme_map()+
+  scale_fill_gradientn(colors = c("greenyellow", "orange", "tomato"), na.value = "white", labels = comma) +
+  scale_color_manual(values = NA, name = "No data") + 
+  labs(title = "Single-family median income", fill = "$") +
+  theme(legend.position = c(0, 0),
+        legend.background = element_rect(fill=alpha("white", 0.5))) +
+  guides(color=guide_legend("No data", override.aes=c(fill="white")))
+```
+
+```{r}
+tract_loans %>%
+  ggplot() +
+  geom_sf(aes(
+    geometry = geometry,
+    fill = as.factor(mode_race)
+  )) +
+  geom_sf(
+    data = river,
+    fill = "blue",
+    color = NA,
+    alpha = 1 / 3
+  ) +
+  theme_map() +
+  scale_fill_manual(
+    values = c("orange", "greenyellow", "tomato"),
+    name = "Race",
+    labels = c("Black or African American", "White", "information not provided"),
+    na.value = "white"
+  ) +
+  labs(title = "Single-family loan mode of race") +
+  theme(legend.position = c(0, 0),
+        legend.background = element_rect(fill = alpha("white", 0.5)))
+
+```
+
+```{r}
+tract_loans %>%
+  ggplot() + 
+  geom_sf(aes(geometry = geometry, fill = mean_age, color = "")) +
+  geom_sf(data = river, fill = "blue", color = NA, alpha = 1/3) +
+  theme_map()+
+  scale_fill_gradientn(colors = c("greenyellow", "orange", "tomato"), na.value = "white", labels = c("~25", "25~34", "35~44", "45~54", "55~64", "65~74", "74~")) +
+  scale_color_manual(values = NA, name = "No data") + 
+  labs(title = "Single-family mean age", fill = "Age") +
+  theme(legend.position = c(0, 0),
+        legend.background = element_rect(fill=alpha("white", 0.5))) +
+  guides(color=guide_legend("No data", override.aes=c(fill="white")))
+```
+
+
+
+
+## Linear Regression
+
+Dependent variable: interest rate
+
+Independent variable: income, loan amount, age, gender, race, loan term
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 ## Tasks
@@ -606,7 +800,7 @@ ggplot(avg_year_purpose) +
     + Average number of units for multifamily loans
 ```{r}
 avg_nunits <- data %>% 
-  filter(FamilyType == "mf" & numUnits != "NA")
+  filter(FamilyType == "mf" & num_loans != "NA")
 
 avg_nunits <- (
   sum(avg_nunits$numUnits == 1) * (5 + 24) / 2 +
@@ -664,5 +858,28 @@ data %>% filter(Race_1 <= 5, BorrowersIncome <= 250000) %>%
   scale_x_discrete(labels = c("American Indian or Alaska Native", "Asian", "African American", "Native Hawaiian", "White")) 
 ```
 
+```{r}
+sf_data %>% filter(Race_1 <=5, rate >= 0, rate < 25) %>% 
+  ggplot() +
+  geom_boxplot(aes(as.factor(Race_1), rate, fill = as.factor(Race_1)))
+```
+
+```{r}
+sf_data %>% filter(Race_1 <= 5, amt < 999999999, amt > 0) %>% 
+  ggplot() +
+  geom_boxplot(aes(as.factor(Race_1), amt, fill = as.factor(Race_1)))
+```
+```{r}
+sf_data %>% filter(Race_1 <=5, amt < 599999999, amt > 0, rate >= 0, rate < 7) %>% 
+  ggplot(aes(Term, rate)) +
+  geom_point(aes(color = as.factor(Race_1))) +
+  geom_smooth() +
+  facet_wrap(~ Race_1)
+
+
+sf_data %>% filter(Race_1 <=5, Term == 360, rate < 10, amt < 599999999, BorrowersIncome < 90000, BorrowersIncome > 60000) %>% 
+  group_by(Race_1) %>% 
+  summarise(median(rate), median(amt), median(BorrowersIncome))
+```
 
 
