@@ -29,14 +29,19 @@ library(arrow)
 Check if factor analysis would be okay
 
 ```{r}
-full_data_df <- st_drop_geometry(data_pts2)
+full_data <- read_parquet("assembled-data/easy-data.parquet") %>%
+  inner_join(read_parquet("assembled-data/parcel-access.parquet")) %>%
+  inner_join(read_parquet("assembled-data/loan-data.parquet")) 
 
-KMO(full_data_df)
+factor_data <- full_data %>% 
+  select(-PARID, -GEOID, -id)
+  
+KMO(factor_data)
 ```
 KMO is greater than 0.6, so factor analysis is okay
 
 ```{r}
-cortest.bartlett(full_data_df)
+cortest.bartlett(factor_data)
 ```
 
 p-value is zero, so factors analysis is okay
@@ -44,27 +49,48 @@ p-value is zero, so factors analysis is okay
 Take a guess at the right number of factors
 
 ```{r}
-parallel <- fa.parallel(full_data_df)
+parallel <- fa.parallel(factor_data)
 ```
 
-Do factor analysis
+Do principal component analysis and factor analysis with different numbers of factors (as low as 5, as high as the recommended number) and each possible rotation:
+
+* "none"
+* "varimax"
+* "quartimax"
+* "bentlerT"
+* "equamax"
+* "varimin"
+* "geominT"
+* "bifactor"
+* "Promax"
+* "promax"
+* "oblimin"
+* "simplimax"
+* "bentlerQ"
+* "geominQ"
+* "biquartimin"
+* "cluster"
+
+Identify the best-fitting 
 
 ```{r}
-fa.cluster <- fa(full_data_df, 
-              nfactors = 8,
-              rotate = "simplimax") 
+pca <- pca(factor_data, 
+              nfactors = 9,
+              rotate = "none") 
 
-fa.cluster$BIC
-
-
+pca$fit
 ```
-```{r}
-fa.diagram(fa.cluster)
-```
-
 
 
 ```{r}
-st_write(full_data, dsn = 'pitt-shiny/parcels.geojson')
+fa <- fa(factor_data, 
+              nfactors = 11,
+              rotate = "none") 
+
+fa$BIC
 ```
+
+
+
+
 

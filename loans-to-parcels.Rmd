@@ -1,0 +1,77 @@
+---
+title: "Loans to parcels"
+author: "Carole Voulgaris"
+date: "4/1/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Libraries
+
+```{r}
+library(tidyverse)
+library(tigris)
+library(here)
+library(arrow)
+```
+
+
+# Load loan data
+
+```{r}
+tract_loans <- read_csv('tract_loans.csv') %>%
+  filter(!is.na(sf_num_loans),
+         unitE > 0) %>%
+  replace_na(list(mf_num_loans = 0,
+                  mf_purchase = 0)) %>%
+  mutate(GEOID10 = paste0("42003", Tract),
+         pct_sf_loan_purchase = sf_purchase / sf_num_loans,
+         pct_sf_loan_rehab = sf_rehab / sf_num_loans,
+         purchase_per_unit = (mf_purchase + sf_purchase) / unitE) %>%
+  select(GEOID10, 
+         sf_num_loans, 
+         sf_med_income, 
+         sf_med_upb,
+         pct_sf_loan_purchase,
+         pct_sf_loan_rehab,
+         mf_num_loans,
+         unitE,
+         purchase_per_unit) 
+```
+
+# Get tract boundaries
+
+```{r}
+tracts <- tracts(state = "PA", county = "003", year = 2010) %>%
+  inner_join(tract_loans) %>%
+  st_transform("WGS84")
+```
+
+
+# join tracts to parcels
+
+```{r}
+parcels <- here("assembled-data",
+                "parcel-locs.geojson") %>%
+  st_read() %>%
+  st_join(tracts) %>%
+  select(PARID, 
+         sf_num_loans, 
+         sf_med_income, 
+         sf_med_upb,
+         pct_sf_loan_purchase,
+         pct_sf_loan_rehab,
+         mf_num_loans,
+         unitE,
+         purchase_per_unit)
+```
+
+```{r}
+parcels %>%
+  st_drop_geometry() %>%
+  write_parquet(here("assembled-data/loan-data.parquet"))
+```
+

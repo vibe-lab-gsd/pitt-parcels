@@ -135,6 +135,31 @@ data_pts1 <- st_join(parcel_values, sld_data) %>%
   filter(!is.na(hu_dens))
 ```
 
+Get thresholds for building age
+
+```{r}
+vars <- c(
+  since_2014 = "B25034_002",
+  b_2010_to_2013 = "B25034_003",
+  b_2000_to_2009 = "B25034_004",
+  b_1990_to_1999 = "B25034_005",
+  b_1980_to_1989 = "B25034_006",
+  b_1970_to_1979 = "B25034_007",
+  b_1960_to_1969 = "B25034_008",
+  b_1950_to_1959 = "B25034_009",
+  b_1940_to_1949 = "B25034_010",
+  before_1940 = "B25034_011"
+)
+
+chk_bldg_age <- get_acs(geography = "county",
+                    state = "PA",
+                    variables = vars,
+                    summary_var = "B25034_001") %>%
+  filter(GEOID == "42003") %>%
+  mutate(pct = estimate / summary_est) %>%
+  mutate(cum_pct = cumsum(pct))
+```
+
 
 Get census data
 
@@ -144,6 +169,9 @@ Get census data
 * monthly ownership cost without mortgage (median)
 * monthly rent (median)
 * income (gini)
+* pct white
+* diversity index (race)
+* diveristy index (building age)
 
 ```{r}
 vars <- c(total_hus = "B25003_001",
@@ -152,7 +180,22 @@ vars <- c(total_hus = "B25003_001",
           med_cost_with_mort = "B25088_002",
           med_cost_no_mort = "B25088_003",
           median_rent = "B25064_001",
-          gini = "B19083_001")
+          gini = "B19083_001",
+          total_pop = "B03002_001",
+          nh_white = "B03002_003",
+          nh_black = "B03002_004",
+          nh_asian = "B03002_006",
+          hispanic = "B03002_012",
+          since_2014 = "B25034_002",
+          b_2010_to_2013 = "B25034_003",
+          b_2000_to_2009 = "B25034_004",
+          b_1990_to_1999 = "B25034_005",
+          b_1980_to_1989 = "B25034_006",
+          b_1970_to_1979 = "B25034_007",
+          b_1960_to_1969 = "B25034_008",
+          b_1950_to_1959 = "B25034_009",
+          b_1940_to_1949 = "B25034_010",
+          before_1940 = "B25034_011")
 
 census <- get_acs(geography = "tract", 
                   variables = vars, 
@@ -161,15 +204,49 @@ census <- get_acs(geography = "tract",
                   output = "wide", 
                   geometry = TRUE) %>%
   mutate(pct_rental = renter_occE / total_husE,
-         pct_no_mort = no_mortE / total_husE) %>%
+         pct_no_mort = no_mortE / total_husE,
+         pct_nh_white = nh_whiteE / total_popE,
+         pct_nh_black = nh_blackE / total_popE,
+         pct_nh_asian = nh_asianE / total_popE,
+         pct_hispanic = hispanicE / total_popE,
+         pct_since_1980 = (since_2014E + 
+                          b_2010_to_2013E +
+                          b_2000_to_2009E +
+                          b_1990_to_1999E +
+                          b_1980_to_1989E) / total_husE,
+         pct_60s_70s = (b_1970_to_1979E +
+                          b_1960_to_1969E) / total_husE,
+         pct_40s_50s = (b_1950_to_1959E +
+                          b_1940_to_1949E) / total_husE,
+         pct_pre_1940 = before_1940E / total_husE) %>% 
+  mutate(h_white = pct_nh_white * log(pct_nh_white),
+         h_black = pct_nh_black * log(pct_nh_black),
+         h_asian = pct_nh_asian * log(pct_nh_asian),
+         h_hisp = pct_hispanic * log(pct_hispanic),
+         h_since_1980 = pct_since_1980 * log(pct_since_1980),
+         h_60s_70s = pct_60s_70s * log(pct_60s_70s),
+         h_40s_50s = pct_40s_50s * log(pct_40s_50s),
+         h_pre_40s = pct_pre_1940 * log(pct_pre_1940)) %>%
+  rowwise(GEOID) %>%
+  mutate(race_entropy = -1*sum(c(h_white, h_black, h_asian, h_hisp), na.rm = TRUE),
+         bldg_entropy = -1*sum(c(h_since_1980, 
+                                 h_60s_70s, 
+                                 h_40s_50s,
+                                 h_pre_40s), na.rm = TRUE)) %>%
+  ungroup() %>%
   rename(med_cost_with_mort = med_cost_with_mortE,
          med_cost_no_mort = med_cost_no_mortE,
          median_rent = median_rentE,
          gini = giniE) %>%
-  select(pct_rental, pct_no_mort, med_cost_with_mort, 
-         med_cost_no_mort, median_rent, gini) %>%
+  select(GEOID, pct_rental, pct_no_mort, med_cost_with_mort, 
+         med_cost_no_mort, median_rent, gini, pct_nh_white,
+         race_entropy, bldg_entropy) %>%
   st_transform("WGS84")
+```
 
+
+
+```{r}
 # filter if values are missing for less than three percent of all parcels
 data_pts2 <- st_join(data_pts1, census) 
 
