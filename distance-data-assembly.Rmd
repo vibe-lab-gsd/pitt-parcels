@@ -1,0 +1,153 @@
+---
+title: "Data assembly"
+author: "Carole Voulgaris"
+date: "1/20/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE, warning=FALSE, results='hide'}
+options(java.parameters = '-Xmx2G')
+
+library(tidyverse)
+library(sf)
+library(fs)
+library(lubridate)
+library(psych)
+library(nFactors)
+library(tigris)
+library(r5r)
+library(here)
+library(arrow)
+```
+
+Add walk accessiblity to:
+Closest park (https://www.pasda.psu.edu/uci/DataSummary.aspx?dataset=308)
+Closest public school (https://openac-alcogis.opendata.arcgis.com/datasets/AlCoGIS::allegheny-county-public-schools-local-education-agency-leas-locations/about)
+Closest Grocery store (WIC vendors)
+
+Treating each point as 1000 since the accessibility function rounds to the nearest integer
+
+```{r}
+county <- counties(state = "PA") %>%
+  filter(NAME == "Allegheny") %>%
+  st_transform("WGS84")
+
+grocery_pts <- st_read("https://openac-alcogis.opendata.arcgis.com/datasets/ab9ec54e46d8403db31cff6bdc890aff_0.geojson") %>%
+  filter(!is.na(st_dimension(.))) %>%
+  mutate(id = as.character(OBJECTID)) %>%
+  mutate(num = 1000) %>%
+  select(id, num)
+
+school_pts <- st_read(here("raw_datasets",
+                           "schools.geojson")) %>%
+  mutate(id = as.character(FID)) %>%
+  mutate(num = 1000) %>%
+  select(id, num)
+
+park_pts <- st_read(here("raw_datasets",
+                         "DCNR_LocalParkAccess201511")) %>%
+  st_transform("WGS84") %>%
+  st_filter(county) %>%
+  mutate(id = as.character(PARK_ID)) %>%
+  mutate(num = 1000) %>%
+  select(id, num)
+
+parcels <- st_read(here("assembled-data",
+                           "parcel-locs.geojson")) %>%
+  mutate(id = as.character(PARID)) 
+```
+
+```{r}
+r5_core <- r5r::setup_r5(here("network"), verbose = FALSE)
+```
+These take about 24 hours each and return integers - not much variation and the decay function I've set up probably works like a step function anyway.
+```{r}
+Sys.time()
+grocery_access <- accessibility(r5_core,
+                                origins = parcels,
+                                destinations = grocery_pts,
+                                opportunities_colname = "num",
+                                mode = "WALK",
+                                max_trip_duration = 50,
+                                decay_function = "logistic",
+                                cutoffs = 20,
+                                decay_value = 5,
+                                verbose = FALSE)
+
+Sys.time()
+school_access <- accessibility(r5_core,
+                                origins = parcels,
+                                destinations = school_pts,
+                                opportunities_colname = "num",
+                                mode = "WALK",
+                                max_trip_duration = 50,
+                                decay_function = "logistic",
+                                cutoffs = 20,
+                                decay_value = 5,
+                                verbose = FALSE)
+
+Sys.time()
+park_access <- accessibility(r5_core,
+                                origins = parcels,
+                                destinations = park_pts,
+                                opportunities_colname = "num",
+                                mode = "WALK",
+                                max_trip_duration = 50,
+                                decay_function = "logistic",
+                                cutoffs = 20,
+                                decay_value = 5,
+                                verbose = FALSE)
+Sys.time()
+```
+```{r}
+grocery_access <- grocery_access %>%
+  rename(PARID = from_id,
+         grocery_access = accessibility) %>%
+  select(PARID, grocery_access)
+
+park_access <- park_access %>%
+  rename(PARID = from_id,
+         park_access = accessibility) %>%
+  select(PARID, park_access)
+
+school_access <- school_access %>%
+  rename(PARID = from_id,
+         school_access = accessibility) %>%
+  select(PARID, school_access)
+
+parcels <- parcels %>%
+  left_join(grocery_access) %>%
+  left_join(school_access) %>%
+  left_join(park_access)
+```
+
+```{r}
+ggplot(parcels) +
+  geom_sf(aes(color = park_access), size = 0.1) +
+  theme_void()
+```
+
+```{r}
+ggplot(parcels) +
+  geom_sf(aes(color = grocery_access), size = 0.1) +
+  scale_color_viridis_c() +
+  theme_void()
+```
+
+```{r}
+ggplot(parcels) +
+  geom_sf(aes(color = school_access), size = 0.1) +
+  scale_color_viridis_c() +
+  theme_void()
+```
+
+```{r}
+parcel_access_data <- parcels %>%
+  st_drop_geometry() %>%
+  write_parquet("assembled-data/parcel-access.parquet")
+```
+

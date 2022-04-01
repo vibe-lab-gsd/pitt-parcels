@@ -41,3 +41,5 @@ vignettes/*.pdf
 # large files
 raw_datasets/
 parcels.geojson
+NHTS/
+network/

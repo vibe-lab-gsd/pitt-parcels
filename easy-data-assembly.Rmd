@@ -1,0 +1,195 @@
+---
+title: "Data assembly"
+author: "Carole Voulgaris"
+date: "1/20/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE, warning=FALSE, results='hide'}
+library(tidyverse)
+library(sf)
+library(fs)
+library(lubridate)
+library(tidycensus)
+library(here)
+library(arrow)
+```
+
+
+# Load Smart Location Database
+
+Downloaded from https://edg.epa.gov/EPADataCommons/public/OA/SLD/SmartLocationDatabaseV3.zip and saved to raw_datasets folder (listed in .gitignore)
+
+```{r}
+sld_data <- st_read(path('raw_datasets',
+                            'SmartLocationDatabaseV3',
+                            'SmartLocationDatabase.gdb')) %>%
+  filter(STATEFP == '42',
+         COUNTYFP == '003') %>%
+  select(D1A, # HU density
+         D1C8_RET, # retail job density
+         D1C8_OFF, # office job density
+         D1C8_IND, # industrial
+         D1C8_SVC, # service
+         D1C8_ENT, # entertainment
+         D1C8_ED, # education
+         D1C8_HLTH, # health
+         D1C8_PUB, # government?
+         D3APO, # ped network density
+         D4A, # distance to transit
+         D4D, # transit frequency per square mile
+         D5AR, # jobs within 45 minutes, car
+         D5BR) %>% # jobs within 45 minutes, transit
+  rename(hu_dens = D1A,
+         retail_dens = D1C8_RET,
+         office_dens = D1C8_OFF,
+         ind_dens = D1C8_IND,
+         svc_dens = D1C8_SVC,
+         entrtnmnt_dens = D1C8_ENT,
+         educ_dens = D1C8_ED,
+         hlth_dens = D1C8_HLTH,
+         pub_dens = D1C8_PUB,
+         ped_network = D3APO,
+         transit_dist = D4A,
+         transit_freq = D4D,
+         car_jobs = D5AR,
+         transit_jobs = D5BR) %>%
+  st_transform("WGS84")            
+```
+
+# Load county assessor data
+
+```{r}
+parcel_data <- read_csv('https://data.wprdc.org/dataset/2b3df818-601e-4f06-b150-643557229491/resource/f2b8d575-e256-4718-94ad-1e12239ddb92/download/assessments.csv') %>%
+  filter(CLASSDESC == "RESIDENTIAL") 
+ 
+
+parcels <- st_read('https://data.wprdc.org/dataset/6bb2a968-761d-48cf-ac5b-c1fc80b4fe6a/resource/42231cab-8341-48d6-b695-47612dd6514a/download/parcelcoords.csv',
+  options = c("X_POSSIBLE_NAMES=x", "Y_POSSIBLE_NAMES=y")) %>%
+  rename(PARID = PIN) %>%
+  inner_join(parcel_data) %>%
+  st_set_crs("WGS84")
+
+parcel_info <- parcels %>%
+  select(PROPERTYHOUSENUM, PROPERTYFRACTION, PROPERTYADDRESS,
+         PROPERTYUNIT, PROPERTYCITY, PROPERTYSTATE, PROPERTYZIP)
+```
+
+Selected parcel variables --
+
+Exclude properties that have no data on the most recent sale. 
+Exclude properties where the most recent sale is before the second-most-recent sale.
+
+For purposes of calculating the time between sales:
+* If there is no data on the second-most recent sale, assume if happened on January 1, 1806 (the earliest sale in the dataset is November 24, 1806) for $100
+* Average time between sales over two periods only if there is data on the third most recent sale (PREVSALEDATE2)
+
+
+```{r}
+parcel_values <- parcels %>%
+  filter(!is.na(SALEDATE)) %>%
+  mutate(PREVSALEDATE = ifelse(is.na(PREVSALEDATE), 
+                               "01-01-1806", 
+                               PREVSALEDATE)) %>%
+  mutate(SALEDATE = mdy(SALEDATE),
+         PREVSALEDATE = mdy(PREVSALEDATE),
+         PREVSALEDATE2 = mdy(PREVSALEDATE2),
+         ASOFDATE = dmy(ASOFDATE)) %>%
+  mutate(years_since_sale = as.numeric(today() - SALEDATE)/365.25,
+         btw_sales_1 = as.numeric(SALEDATE - PREVSALEDATE)/365.25,
+         btw_sales_2 = as.numeric(PREVSALEDATE - PREVSALEDATE2)/365.25) %>%
+  filter(btw_sales_1 > 0) %>%
+  mutate(btw_sales_avg = ifelse(is.na(btw_sales_2), 
+                                btw_sales_1,
+                                (btw_sales_1 + btw_sales_2)/2)) %>%
+  mutate(ten_year_date = case_when(PREVSALEDATE == mdy("01-01-1806") ~ SALEDATE,
+                                   SALEDATE < (today() - years(10)) ~ SALEDATE,
+                                   PREVSALEDATE < (today() - years(10)) ~ PREVSALEDATE,
+                                   !is.na(PREVSALEPRICE2) ~ PREVSALEDATE2,
+                                   TRUE ~ PREVSALEDATE)) %>%
+  mutate(ten_year_price = case_when(PREVSALEDATE == mdy("01-01-1806") ~ SALEPRICE,
+                                    SALEDATE < (today() - years(10)) ~ SALEPRICE,
+                                    PREVSALEDATE < (today() - years(10)) ~ PREVSALEPRICE,
+                                    !is.na(PREVSALEPRICE2) ~ PREVSALEPRICE2,
+                                    TRUE ~ PREVSALEPRICE)) %>%
+  filter(!is.na(ten_year_price)) %>%
+  mutate(ten_year_period = as.numeric(ASOFDATE - ten_year_date)/365.25) %>%
+  mutate(ten_year_price = ifelse(ten_year_price < 100, 100, ten_year_price)) %>%
+  mutate(ten_yr_increase_rate = ((FAIRMARKETTOTAL/ten_year_price)^(1/ten_year_period)) - 1) %>%
+  mutate(bldg_pct = FAIRMARKETBUILDING / FAIRMARKETTOTAL) %>%
+  select(PARID,
+         FAIRMARKETTOTAL, 
+         bldg_pct, 
+         btw_sales_avg,
+         ten_yr_increase_rate)
+```
+
+join parcel data to SLD data 
+
+```{r}
+data_pts1 <- st_join(parcel_values, sld_data) %>%
+  filter(!is.na(hu_dens))
+```
+
+
+Get census data
+
+* percent renters
+* percent owners without mortgage
+* monthly ownership cost with mortgage (median)
+* monthly ownership cost without mortgage (median)
+* monthly rent (median)
+* income (gini)
+
+```{r}
+vars <- c(total_hus = "B25003_001",
+          renter_occ = "B25003_003",
+          no_mort = "B25081_008",
+          med_cost_with_mort = "B25088_002",
+          med_cost_no_mort = "B25088_003",
+          median_rent = "B25064_001",
+          gini = "B19083_001")
+
+census <- get_acs(geography = "tract", 
+                  variables = vars, 
+                  state = "PA",
+                  county = "Allegheny",
+                  output = "wide", 
+                  geometry = TRUE) %>%
+  mutate(pct_rental = renter_occE / total_husE,
+         pct_no_mort = no_mortE / total_husE) %>%
+  rename(med_cost_with_mort = med_cost_with_mortE,
+         med_cost_no_mort = med_cost_no_mortE,
+         median_rent = median_rentE,
+         gini = giniE) %>%
+  select(pct_rental, pct_no_mort, med_cost_with_mort, 
+         med_cost_no_mort, median_rent, gini) %>%
+  st_transform("WGS84")
+
+# filter if values are missing for less than three percent of all parcels
+data_pts2 <- st_join(data_pts1, census) 
+
+data_pts2 <- data_pts2 %>%
+  filter(!is.na(data_pts2$median_rent) &
+           !is.na(data_pts2$med_cost_no_mort) &
+           !is.na(data_pts2$med_cost_with_mort) &
+           !is.na(data_pts2$pct_no_mort) &
+           !is.na(data_pts2$pct_rental))
+```
+
+write to file
+
+```{r}
+full_data_df <- st_drop_geometry(data_pts2)
+parcels <- data_pts2 %>%
+  select(PARID)
+
+write_parquet(full_data_df, here("assembled-data",
+                                 "easy-data.parquet"))
+st_write(parcels, here("assembled-data",
+                       "parcel-locs.geojson"))
+```

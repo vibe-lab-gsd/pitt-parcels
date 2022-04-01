@@ -1,0 +1,49 @@
+---
+title: "NHTS"
+author: "Carole Voulgaris"
+date: "3/4/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load libraries
+
+```{r}
+library(tidyverse)
+library(here)
+library(survey)
+library(srvyr)
+```
+
+
+# Load data
+
+```{r}
+home_walk_trips <- here("NHTS",
+              "trippub.csv") %>%
+  read_csv() %>%
+  filter(TRPTRANS == "01",
+         WHYFROM == "01" | WHYFROM == "02",
+         WHYTO != "01") %>%
+  select(WHYTO, WHYFROM, WTTRDFIN)
+```
+
+
+```{r}
+trips_svy <- home_walk_trips %>%
+  as_survey(weights = WTTRDFIN)
+```
+
+```{r}
+summary <-  trips_svy %>%
+  group_by(WHYTO) %>%
+  survey_tally() %>%
+  arrange(desc(n)) 
+
+summary %>%
+  mutate(pct = n * 100 / sum(n))
+```
+

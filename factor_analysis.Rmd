@@ -1,0 +1,70 @@
+---
+title: "Data assembly"
+author: "Carole Voulgaris"
+date: "1/20/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE, warning=FALSE, results='hide'}
+options(java.parameters = '-Xmx2G')
+
+library(tidyverse)
+library(sf)
+library(fs)
+library(lubridate)
+library(psych)
+library(nFactors)
+library(tigris)
+library(r5r)
+library(here)
+library(arrow)
+```
+
+
+
+Check if factor analysis would be okay
+
+```{r}
+full_data_df <- st_drop_geometry(data_pts2)
+
+KMO(full_data_df)
+```
+KMO is greater than 0.6, so factor analysis is okay
+
+```{r}
+cortest.bartlett(full_data_df)
+```
+
+p-value is zero, so factors analysis is okay
+
+Take a guess at the right number of factors
+
+```{r}
+parallel <- fa.parallel(full_data_df)
+```
+
+Do factor analysis
+
+```{r}
+fa.cluster <- fa(full_data_df, 
+              nfactors = 8,
+              rotate = "simplimax") 
+
+fa.cluster$BIC
+
+
+```
+```{r}
+fa.diagram(fa.cluster)
+```
+
+
+
+```{r}
+st_write(full_data, dsn = 'pitt-shiny/parcels.geojson')
+```
+
