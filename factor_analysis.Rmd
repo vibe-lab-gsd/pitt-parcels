@@ -22,6 +22,8 @@ library(tigris)
 library(r5r)
 library(here)
 library(arrow)
+library(GPArotation)
+library(ggfortify)
 ```
 
 
@@ -33,8 +35,10 @@ full_data <- read_parquet("assembled-data/easy-data.parquet") %>%
   inner_join(read_parquet("assembled-data/parcel-access.parquet")) %>%
   inner_join(read_parquet("assembled-data/loan-data.parquet")) 
 
-factor_data <- full_data %>% 
+factor_data <- full_data %>%
   select(-PARID, -GEOID, -id)
+
+drop_na(full_data)
   
 KMO(factor_data)
 ```
@@ -49,7 +53,17 @@ p-value is zero, so factors analysis is okay
 Take a guess at the right number of factors
 
 ```{r}
-parallel <- fa.parallel(factor_data)
+# PCR calculates correlation matrix first and finds eigenvector and eigenvalue based on the correlation matrix.
+# conduct PCR analysis with the correlation matrix to reduce calculation time.
+correlation = cor(factor_data, use = "complete.obs" )
+corPlot(correlation)
+
+# PC number is 11, Factor component number is 4
+fa.parallel(correlation)
+abline( h = 0 )
+
+# VSS(correlation)
+# parallel <- fa.parallel(factor_data)
 ```
 
 Do principal component analysis and factor analysis with different numbers of factors (as low as 5, as high as the recommended number) and each possible rotation:
@@ -57,7 +71,7 @@ Do principal component analysis and factor analysis with different numbers of fa
 * "none"
 * "varimax"
 * "quartimax"
-* "bentlerT"
+* "bentlerT" not worked
 * "equamax"
 * "varimin"
 * "geominT"
@@ -66,30 +80,287 @@ Do principal component analysis and factor analysis with different numbers of fa
 * "promax"
 * "oblimin"
 * "simplimax"
-* "bentlerQ"
+* "bentlerQ" not worked
 * "geominQ"
 * "biquartimin"
-* "cluster"
+* "cluster" not worked
 
 Identify the best-fitting 
 
 ```{r}
-pca <- pca(factor_data, 
-              nfactors = 9,
-              rotate = "none") 
+# conduct PCR analysis using different nfactors and rotation methods
+for (i in c(1:15)) {
+  filename <- paste0("pca_", i)
+  assign(
+    filename,
+    pca(correlation,
+        nfactors = i,
+        rotate = "none"))
+}
 
-pca$fit
+for (i in c("none", "varimax", "quartimax",  "equamax", "varimin", "geominT", "bifactor", "Promax", "promax", "oblimin", "simplimax",  "geominQ", "biquartimin")) {
+  filename <- paste0("pca_", i)
+  assign(
+    filename,
+    pca(correlation,
+        nfactors = 11,
+        rotate = i)
+  )
+}
+
+# fit improves as the nfactors increases (it will be 1 if I include 39 variables). Also, rotations do not change the fit  
+pca_1$fit
+pca_2$fit
+pca_3$fit
+pca_4$fit
+pca_5$fit
+
+pca_none$fit
+pca_varimax$fit
+pca_quartimax$fit
+pca_equamax$fit
+pca_geominT$fit
+```
+
+```{r}
+# extract loads (eigenvectors)
+
+pca_load <- pca_none$loadings[, 1:11]
+
+ggplot(pca_load, aes(PC1, PC2)) +
+  geom_point() +
+  geom_text(aes(label=ifelse(PC1>0.5 | PC1 < -0.5, row.names(pca_load), ""),hjust=0,vjust=0))
+```
+
+```{r}
+ggplot(pca_load) +
+  geom_bar(aes(reorder(row.names(pca_load), PC1), PC1), stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+# PC1: commercial area (city center) vs single-family residential area
+# transit_jobs and transit_dist seem containing some errors (-9999)
 ```
 
 
 ```{r}
-fa <- fa(factor_data, 
-              nfactors = 11,
-              rotate = "none") 
+ggplot(pca_load) +
+  geom_bar(aes(reorder(row.names(pca_load), PC2), PC2), stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
 
-fa$BIC
+# PC2: wealth
 ```
 
+
+```{r}
+ggplot(pca_load) +
+  geom_bar(aes(reorder(row.names(pca_load), PC3), PC3), stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+# PC3: CBD
+```
+
+
+```{r}
+ggplot(pca_load) +
+  geom_bar(aes(reorder(row.names(pca_load), PC4), PC4), stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+# PC4: diversity and housing access
+```
+
+
+```{r}
+ggplot(pca_load) +
+  geom_bar(aes(reorder(row.names(pca_load), PC5), PC5), stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+# PC5: new residential area vs old residential area
+```
+
+```{r}
+# normalize the factor data for the fitting
+factor_scale <- scale(factor_data) %>% 
+  as.matrix()
+
+# fit the normalized factor data to eigenvalues
+pca_fit <- factor_scale%*%pca_load %>% 
+  as.data.frame()
+
+# calculate the average of PCs to prepare for spatial visualization
+pca_fit$GEOID <- full_data$GEOID
+pca_fit_tract <- pca_fit %>% 
+  group_by(GEOID) %>% 
+  summarise(PC1 = mean(PC1, na.rm = TRUE), PC2 = mean(PC2, na.rm = TRUE), PC3 = mean(PC3, na.rm = TRUE), PC4 = mean(PC4, na.rm = TRUE), PC5 = mean(PC5, na.rm = TRUE))
+
+tract <- get_acs(
+  geography = "tract",
+  variables = "B01001_001",
+  state = "PA",
+  county = "Allegheny",
+  output = "wide",
+  geometry = TRUE
+)
+
+pca_fit_tract <- left_join(tract, pca_fit_tract, by = c("GEOID" = "GEOID"))
+```
+
+```{r}
+PA_state_plane <- "+proj=lcc +lat_1=41.95 +lat_2=40.88333333333333 +lat_0=40.16666666666666 +lon_0=-77.75 +x_0=600000 +y_0=0 +ellps=GRS80 +datum=NAD83 +to_meter=0.3048006096012192 +no_defs"
+river <- read_sf("https://openac-alcogis.opendata.arcgis.com/datasets/def3bd39f12d408c9bd097f5a3b3b136_0.geojson?outSR=%7B%22latestWkid%22%3A3857%2C%22wkid%22%3A102100%7D") %>% 
+  st_transform(PA_state_plane)
+
+ggplot(pca_fit_tract) +
+  geom_sf(aes(fill = PC1)) +
+   geom_sf(data = river, fill = "yellow", color = NA) 
+
+ggplot(pca_fit_tract) +
+  geom_sf(aes(fill = PC2))+
+   geom_sf(data = river, fill = "yellow", color = NA) 
+
+ggplot(pca_fit_tract) +
+  geom_sf(aes(fill = PC3))+
+   geom_sf(data = river, fill = "yellow", color = NA) 
+
+ggplot(pca_fit_tract) +
+  geom_sf(aes(fill = PC4))+
+   geom_sf(data = river, fill = "yellow", color = NA) 
+
+ggplot(pca_fit_tract) +
+  geom_sf(aes(fill = PC5))+
+   geom_sf(data = river, fill = "yellow", color = NA) 
+```
+
+
+```{r}
+for (i in c(
+  "none",
+  "varimax",
+  "quartimax",
+  "equamax",
+  "varimin",
+  "geominT",
+  "Promax",
+  "promax",
+  "oblimin",
+  "simplimax",
+  "biquartimin",
+  "bifactor",
+  "geominQ"
+)) {
+  filename <- paste0("fa_", i)
+    assign(filename,
+           fa(correlation,
+              nfactors = 4,
+              rotate = i))
+  }
+
+fit <- data.frame(matrix(rep(NA, 4), nrow=1))[numeric(0), ]
+for (i in c(
+  "none",
+  "varimax",
+  "quartimax",
+  "equamax",
+  "varimin",
+  "geominT",
+  "Promax",
+  "promax",
+  "oblimin",
+  "simplimax",
+  "biquartimin",
+  "bifactor",
+  "geominQ"
+)) {
+  for (j in c(1:15)) {
+    fa_analysis <- fa(correlation,
+                      nfactors = j,
+                      rotate = i)
+    fa_fit <-
+      c(fa_analysis$rotation,
+        fa_analysis$factors,
+        fa_analysis$fit.off,
+        fa_analysis$rms)
+    fit <- rbind(fit, fa_fit)
+  }
+}
+colnames(fit) <- c("fa_method", "n_factor","fit_value", "rms")
+
+# rotations do not change the fit value
+```
+
+
+```{r}
+fa_oblimin_load <- fa_oblimin$loadings[, 1:4]
+
+fa_oblimin_value <- fa_oblimin$values
+fa.diagram(fa_oblimin)
+```
+
+
+```{r}
+ggplot(fa_varimax_load) +
+  geom_bar(aes(reorder(row.names(fa_varimax_load), MR1), MR1), stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+# MR1: wealth
+```
+
+```{r}
+ggplot(fa_oblimin_load) +
+  geom_bar(aes(reorder(row.names(fa_oblimin_load), MR2), MR2), stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+# MR2: commercial area vs residential area
+```
+
+
+```{r}
+ggplot(fa_oblimin_load) +
+  geom_bar(aes(reorder(row.names(fa_oblimin_load), MR3), MR3), stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+# CBD
+```
+
+
+```{r}
+ggplot(fa_oblimin_load) +
+  geom_bar(aes(reorder(row.names(fa_oblimin_load), MR4), MR4), stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+# diversity, access to home ownership
+```
+
+```{r}
+# fit the normalized factor data to eigenvalues
+fa_fit <- factor_scale%*%fa_oblimin_load %>% 
+  as.data.frame()
+
+# prepare for spatial visualization
+fa_fit$GEOID <- full_data$GEOID
+fa_fit_tract <- fa_fit %>% 
+  group_by(GEOID) %>% 
+  summarise(MR1 = mean(MR1, na.rm = TRUE), MR2 = mean(MR2, na.rm = TRUE), MR3 = mean(MR3, na.rm = TRUE), MR4 = mean(MR4, na.rm = TRUE))
+
+fa_fit_tract <- left_join(tract, fa_fit_tract, by = c("GEOID" = "GEOID"))
+```
+
+```{r}
+ggplot(fa_fit_tract) +
+  geom_sf(aes(fill = MR1)) +
+   geom_sf(data = river, fill = "yellow", color = NA) 
+
+ggplot(fa_fit_tract) +
+  geom_sf(aes(fill = MR2))+
+   geom_sf(data = river, fill = "yellow", color = NA) 
+
+ggplot(fa_fit_tract) +
+  geom_sf(aes(fill = MR3))+
+   geom_sf(data = river, fill = "yellow", color = NA) 
+
+ggplot(fa_fit_tract) +
+  geom_sf(aes(fill = MR4))+
+   geom_sf(data = river, fill = "yellow", color = NA) 
+```
 
 
 
