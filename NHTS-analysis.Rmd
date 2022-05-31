@@ -31,7 +31,7 @@ home_walk_trips <- here("NHTS",
   select(WHYTO, WHYFROM, WTTRDFIN)
 ```
 
-
+# comment to demonstrate editing code
 ```{r}
 trips_svy <- home_walk_trips %>%
   as_survey(weights = WTTRDFIN)
